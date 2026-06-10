@@ -16,15 +16,7 @@ function htmlPartialsAndCopyPlugin() {
           return match;
         }
       });
-    },
-    closeBundle() {
-      // Copy lib folder to dist on build
-      const srcDir = path.resolve(process.cwd(), 'lib');
-      const destDir = path.resolve(process.cwd(), 'dist/lib');
-      if (fs.existsSync(srcDir)) {
-        fs.cpSync(srcDir, destDir, { recursive: true });
-      }
-    },
+    }
   };
 }
 
