@@ -670,7 +670,10 @@ export function copoSketch(p) {
 
       sNoise = (1 + sNoise) * 0.5;
 
-      const colorIndex = Math.abs(~~(sNoise * palette.temp.length));
+      const colorIndex = Math.min(
+        Math.abs(~~(sNoise * palette.temp.length)),
+        Math.max(0, palette.temp.length - 1)
+      );
 
       const fractSize = 1 / palette.temp.length;
       const valueInRange = (sNoise - colorIndex * fractSize) / fractSize;
