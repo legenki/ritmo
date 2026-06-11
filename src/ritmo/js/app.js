@@ -5,7 +5,6 @@
 import { createMap2 } from './map2.js';
 import { Gradient } from './gradient.js';
 import { SECTIONS, COLOR_SECTIONS } from './controls.js';
-import { PRESETS } from './presets.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
@@ -17,6 +16,7 @@ import {
 
 const STORAGE_KEY = 'ritmo-tool';
 const MAX_SEED = 10000;
+let PRESETS = {};
 
 export function ritmoSketch(p) {
   let canvasContainer;
@@ -1101,25 +1101,30 @@ export function ritmoSketch(p) {
     p.frameRate(rec.frameRate);
 
     setupBuffers();
-    buildUI();
-    bindFooter();
 
     const restored = loadState();
     arrayUpdate();
     noiseSeedUpdate();
 
-    if (restored) {
-      setupBuffers();
-      updateColors();
-      syncUIFromState();
-    } else {
-      // First run: load a random built-in preset (like the original).
-      const keys = Object.keys(PRESETS);
-      const pick = keys[Math.floor(Math.random() * keys.length)];
-      applyPreset(PRESETS[pick]);
-      const sel = document.getElementById('ri-preset');
-      if (sel) sel.value = pick;
-    }
+    fetch(`${import.meta.env.BASE_URL}assets/ritmo/presets.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        PRESETS = data;
+        buildUI();
+        bindFooter();
+        if (restored) {
+          setupBuffers();
+          updateColors();
+          syncUIFromState();
+        } else {
+          const keys = Object.keys(PRESETS);
+          const pick = keys[Math.floor(Math.random() * keys.length)];
+          applyPreset(PRESETS[pick]);
+          const sel = document.getElementById('ri-preset');
+          if (sel) sel.value = pick;
+        }
+      })
+      .catch((e) => console.warn('[ritmo] presets load failed:', e));
   };
 
   p.draw = () => {

@@ -7,7 +7,6 @@
 import { easeFunctions } from './ease.js';
 import { shapeTypesData } from './shapes.js';
 import { SECTIONS } from './controls.js';
-import { PRESETS } from './presets.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
@@ -19,6 +18,7 @@ import {
 } from '../../shared/ui/panelBuilder.js';
 
 const STORAGE_KEY = 'copo-tool';
+let PRESETS = {};
 
 export function copoSketch(p) {
   let canvasContainer;
@@ -1196,39 +1196,41 @@ export function copoSketch(p) {
     p.createCanvas(480, 480);
     p.frameRate(rec.frameRate);
 
-    buildUI();
-    bindFooter();
-
-    // Default mask image + palettes load async.
-    p.loadImage(`${import.meta.env.BASE_URL}assets/copo/mask.webp`, (img) => {
-      mask.image.temp = img;
-      if (!mask.image.data) mask.image.data = img;
-      if (mask.mode === 'image') restartProgram();
-    });
-    fetch(`${import.meta.env.BASE_URL}assets/copo/palettes.json`)
-      .then((r) => r.json())
-      .then((data) => {
-        palette.data = data;
-      })
-      .catch((e) => console.warn('[copo] palettes load failed:', e));
-
     const restored = loadState();
     switchShape();
     seedEvent(restored ? seed.value : undefined);
     updateCanvas();
     isReady = true;
 
-    if (restored) {
-      populatePaletteColors();
-      restartProgram();
-      syncUIFromState();
-    } else {
-      const keys = Object.keys(PRESETS);
-      const pick = keys[Math.floor(Math.random() * keys.length)];
-      applyPreset(PRESETS[pick]);
-      const sel = document.getElementById('co-preset');
-      if (sel) sel.value = pick;
-    }
+    // Mask image, palettes and presets all load async.
+    p.loadImage(`${import.meta.env.BASE_URL}assets/copo/mask.webp`, (img) => {
+      mask.image.temp = img;
+      if (!mask.image.data) mask.image.data = img;
+      if (mask.mode === 'image') restartProgram();
+    });
+
+    Promise.all([
+      fetch(`${import.meta.env.BASE_URL}assets/copo/palettes.json`).then((r) => r.json()),
+      fetch(`${import.meta.env.BASE_URL}assets/copo/presets.json`).then((r) => r.json()),
+    ])
+      .then(([palettesData, presetsData]) => {
+        palette.data = palettesData;
+        PRESETS = presetsData;
+        buildUI();
+        bindFooter();
+        if (restored) {
+          populatePaletteColors();
+          restartProgram();
+          syncUIFromState();
+        } else {
+          const keys = Object.keys(PRESETS);
+          const pick = keys[Math.floor(Math.random() * keys.length)];
+          applyPreset(PRESETS[pick]);
+          const sel = document.getElementById('co-preset');
+          if (sel) sel.value = pick;
+        }
+      })
+      .catch((e) => console.warn('[copo] assets load failed:', e));
   };
 
   p.draw = () => {

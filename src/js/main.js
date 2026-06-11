@@ -1,17 +1,33 @@
 import { registerSW } from 'virtual:pwa-register';
 import { ensureVendorLibs } from '../shared/utils/lazyLibs.js';
 
-// Register Service Worker for PWA. The returned updater is invoked on
-// onNeedRefresh so new content is applied without a manual reload.
+// Register Service Worker for PWA. New content shows a toast; the user
+// decides when to reload so an in-progress session isn't lost.
 const updateSW = registerSW({
   onNeedRefresh() {
-    console.log('New content available, updating…');
-    updateSW(true);
+    showUpdateToast(() => updateSW(true));
   },
   onOfflineReady() {
     console.log('App is ready to work offline.');
   },
 });
+
+function showUpdateToast(onUpdate) {
+  const toast = document.createElement('div');
+  toast.style.cssText =
+    'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);' +
+    'background:var(--color-surface,#fff);color:var(--color-text,#000);' +
+    'border:1px solid var(--color-border,#ccc);border-radius:8px;' +
+    'padding:10px 16px;display:flex;gap:12px;align-items:center;' +
+    'box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:9999;font-size:13px;';
+  toast.innerHTML =
+    '<span>New version available</span>' +
+    '<button style="padding:4px 10px;border-radius:5px;border:none;cursor:pointer;font-size:12px;">Update</button>' +
+    '<button style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;" aria-label="Dismiss">✕</button>';
+  document.body.appendChild(toast);
+  toast.querySelectorAll('button')[0].addEventListener('click', () => { toast.remove(); onUpdate(); });
+  toast.querySelectorAll('button')[1].addEventListener('click', () => toast.remove());
+}
 
 /**
  * Single source of truth for the workspaces. Adding a new workspace means
@@ -29,6 +45,7 @@ const updateSW = registerSW({
  * @property {string[]} [libs]      Vendor globals the sketch needs (see lazyLibs.js);
  *                                  loaded in parallel with the chunk, ready before setup().
  * @property {p5|null}  instance    Lazily created p5 instance (mutated at runtime).
+ * @property {Promise<void>|null} pending  In-flight init promise; null when idle.
  */
 /** @type {Workspace[]} */
 const workspaces = [

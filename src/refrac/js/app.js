@@ -5,7 +5,6 @@
 
 import { createMap2 } from '../../ritmo/js/map2.js';
 import { SECTIONS } from './controls.js';
-import { PRESETS } from './presets.js';
 import { boxShaderCode, flowShaderCode, sineShaderCode, refractShaderCode } from './shaders.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
@@ -17,6 +16,7 @@ import {
 } from '../../shared/ui/panelBuilder.js';
 
 const STORAGE_KEY = 'refrac-tool';
+let PRESETS = {};
 
 const UNSPLASH_IMAGES = [
   'https://images.unsplash.com/photo-1532690261466-909b35d13f57',
@@ -586,24 +586,28 @@ export function refracSketch(p) {
     p.noStroke();
     p.frameRate(rec.frameRate);
 
-    buildUI();
-    bindFooter();
-
     const restored = loadState();
     seedEvent();
-
-    if (!restored) {
-      const keys = Object.keys(PRESETS);
-      const pick = keys[Math.floor(Math.random() * keys.length)];
-      applyPreset(PRESETS[pick]);
-      const sel = document.getElementById('re-preset');
-      if (sel) sel.value = pick;
-    } else {
-      syncUIFromState();
-    }
-
     isReady = true;
     loadDefaultImage();
+
+    fetch(`${import.meta.env.BASE_URL}assets/refrac/presets.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        PRESETS = data;
+        buildUI();
+        bindFooter();
+        if (!restored) {
+          const keys = Object.keys(PRESETS);
+          const pick = keys[Math.floor(Math.random() * keys.length)];
+          applyPreset(PRESETS[pick]);
+          const sel = document.getElementById('re-preset');
+          if (sel) sel.value = pick;
+        } else {
+          syncUIFromState();
+        }
+      })
+      .catch((e) => console.warn('[refrac] presets load failed:', e));
   };
 
   p.draw = () => {

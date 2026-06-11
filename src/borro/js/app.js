@@ -6,7 +6,6 @@
 
 import { createMap2 } from '../../ritmo/js/map2.js';
 import { SECTIONS } from './controls.js';
-import { PRESETS } from './presets.js';
 import { baseVert, blurFrag, grainFrag } from './shaders.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
@@ -19,6 +18,7 @@ import {
 
 const STORAGE_KEY = 'borro-tool';
 const MAX_SEED = 10000;
+let PRESETS = {};
 
 export function borroSketch(p) {
   let canvasContainer;
@@ -1155,37 +1155,38 @@ export function borroSketch(p) {
     p.createCanvas(size.width, size.height, p.WEBGL);
     p.frameRate(rec.frameRate);
 
-    buildUI();
-    bindFooter();
-
     const restored = loadState();
     updateCanvas();
     seedEvent();
     isReady = true;
 
-    // Defined palettes load async; refresh palette-dependent state on arrival.
-    fetch(`${import.meta.env.BASE_URL}assets/borro/palettes.json`)
-      .then((r) => r.json())
-      .then((data) => {
-        palettesArray = Object.values(data);
+    // Palettes and presets load async in parallel.
+    Promise.all([
+      fetch(`${import.meta.env.BASE_URL}assets/borro/palettes.json`).then((r) => r.json()),
+      fetch(`${import.meta.env.BASE_URL}assets/borro/presets.json`).then((r) => r.json()),
+    ])
+      .then(([palettesData, presetsData]) => {
+        palettesArray = Object.values(palettesData);
+        PRESETS = presetsData;
+        buildUI();
+        bindFooter();
+        if (restored) {
+          updatePalette();
+          createForms();
+          syncUIFromState();
+        } else {
+          const keys = Object.keys(PRESETS);
+          const pick = keys[Math.floor(Math.random() * keys.length)];
+          applyPreset(PRESETS[pick]);
+          const sel = document.getElementById('bo-preset');
+          if (sel) sel.value = pick;
+        }
         if (palette.type === 'defined') {
           updatePalette();
           createForms();
         }
       })
-      .catch((e) => console.warn('[borro] palettes load failed:', e));
-
-    if (restored) {
-      updatePalette();
-      createForms();
-      syncUIFromState();
-    } else {
-      const keys = Object.keys(PRESETS);
-      const pick = keys[Math.floor(Math.random() * keys.length)];
-      applyPreset(PRESETS[pick]);
-      const sel = document.getElementById('bo-preset');
-      if (sel) sel.value = pick;
-    }
+      .catch((e) => console.warn('[borro] assets load failed:', e));
   };
 
   p.draw = () => {

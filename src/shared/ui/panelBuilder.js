@@ -68,16 +68,21 @@ export function createPanelBuilder({
       }
       const slide = row.querySelector(`#${ctrl.id}`);
       const num = row.querySelector(`#${ctrl.id}-num`);
-      const onInput = (v) => {
-        const n = parseFloat(v);
-        slide.value = n;
+      slide.addEventListener('input', (e) => {
+        const n = parseFloat(e.target.value);
         num.value = n;
         setByPath(state, ctrl.path, n);
         if (onSliderInput) onSliderInput(ctrl, n);
         applyChange(ctrl);
-      };
-      slide.addEventListener('input', (e) => onInput(e.target.value));
-      num.addEventListener('input', (e) => onInput(e.target.value));
+      });
+      num.addEventListener('input', (e) => {
+        const n = parseFloat(e.target.value);
+        if (!Number.isFinite(n)) return;
+        slide.value = n;
+        setByPath(state, ctrl.path, n);
+        if (onSliderInput) onSliderInput(ctrl, n);
+        applyChange(ctrl);
+      });
     } else if (ctrl.type === 'select') {
       const opts = Object.entries(ctrl.options)
         .map(
