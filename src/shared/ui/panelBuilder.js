@@ -171,6 +171,12 @@ export function createPanelBuilder({
         applyChange(ctrl);
         refreshVisibility();
       });
+    } else if (ctrl.type === 'icon-button') {
+      row.innerHTML = `<button id="${ctrl.id}" class="btn btn-icon" title="${ctrl.label}">${ctrl.icon}</button>`;
+      row.querySelector(`#${ctrl.id}`).addEventListener('click', () => {
+        applyChange(ctrl);
+        refreshVisibility();
+      });
     }
 
     return row;
@@ -194,10 +200,11 @@ export function createPanelBuilder({
       for (const ctrl of section.controls) {
         const row = buildControl(ctrl, section.compact);
         if (!row) continue;
-        if (ctrl.type === 'slider' && ctrl.pair) {
+        if ((ctrl.type === 'slider' && ctrl.pair) || (ctrl.pair && ctrl.type !== 'slider')) {
           if (!pairContainer) {
             pairContainer = document.createElement('div');
             pairContainer.className = 'parameter-row-group';
+            if (ctrl.type === 'icon-button') pairContainer.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:8px;';
             content.appendChild(pairContainer);
           }
           pairContainer.appendChild(row);
@@ -267,9 +274,9 @@ export function buildPresetSection(root, { idPrefix, presets, onExport, onImport
   const ioButtons =
     onExport || onImport
       ? `
-        <div class="parameter-row" style="display:flex; gap:8px;">
-          ${onExport ? `<button id="${idPrefix}-preset-export" class="btn btn-secondary" style="flex:1;">Export</button>` : ''}
-          ${onImport ? `<button id="${idPrefix}-preset-import" class="btn btn-secondary" style="flex:1;">Import</button>` : ''}
+        <div class="parameter-row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          ${onExport ? `<button id="${idPrefix}-preset-export" class="btn btn-secondary">Export</button>` : ''}
+          ${onImport ? `<button id="${idPrefix}-preset-import" class="btn btn-secondary">Import</button>` : ''}
         </div>`
       : '';
   sec.innerHTML = `
