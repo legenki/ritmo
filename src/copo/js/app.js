@@ -11,6 +11,7 @@ import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
 import { saveSVG } from '../../shared/utils/svgDownload.js';
+import { downloadPresetJSON, openPresetFile, openImageFile } from '../../shared/utils/presetIO.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -142,7 +143,12 @@ export function copoSketch(p) {
     const root = document.getElementById('co-controls');
     if (!root) return;
     root.innerHTML = '';
-    buildPresetSection(root, { idPrefix: 'co', presets: PRESETS });
+    buildPresetSection(root, {
+      idPrefix: 'co',
+      presets: PRESETS,
+      onExport: exportPreset,
+      onImport: importPreset,
+    });
     panel.buildSections(root, SECTIONS);
     openSections(root, [0, 1]);
     refreshVisibility();
@@ -161,6 +167,9 @@ export function copoSketch(p) {
       case 'co-shuffle-palette':
         shufflePalette();
         syncUIFromState();
+        break;
+      case 'co-mask-upload':
+        uploadMaskImage();
         break;
     }
 
@@ -215,6 +224,7 @@ export function copoSketch(p) {
     show('co-mask-round', m === 'parametric');
     show('co-mask-min', m === 'parametric');
     show('co-mask-max', m === 'parametric');
+    show('co-mask-upload', m === 'image');
     show('co-mask-scale', m === 'image');
     show('co-mask-bright', m === 'image');
     show('co-mask-contrast', m === 'image');
@@ -917,27 +927,65 @@ export function copoSketch(p) {
   }
 
   // ---- Persistence ----
+  function serializeState() {
+    return {
+      seed: { value: seed.value },
+      cnv: {
+        ratio: cnv.ratio,
+        scale: cnv.scale,
+        animation: cnv.animation,
+        bg: cnv.bg,
+      },
+      params,
+      pattern,
+      mask: { ...mask, image: { ...mask.image, data: undefined, temp: undefined } },
+      shape: { type: shape.type, svg: shape.svg, width: shape.width, height: shape.height },
+      palette: { array: palette.array, use: palette.use },
+      rec: { length: { value: rec.length.value } },
+    };
+  }
+
   let saveTimer = null;
   function saveState() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const data = {
-        seed: { value: seed.value },
-        cnv: {
-          ratio: cnv.ratio,
-          scale: cnv.scale,
-          animation: cnv.animation,
-          bg: cnv.bg,
-        },
-        params,
-        pattern,
-        mask: { ...mask, image: { ...mask.image, data: undefined, temp: undefined } },
-        shape: { type: shape.type, svg: shape.svg, width: shape.width, height: shape.height },
-        palette: { array: palette.array, use: palette.use },
-        rec: { length: { value: rec.length.value } },
-      };
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
     }, 500);
+  }
+
+  function exportPreset() {
+    const data = serializeState();
+    // Embed the mask image so the preset is self-contained — applyPreset
+    // already restores base64 data via p.loadImage.
+    if (mask.mode === 'image' && mask.image.data && mask.image.data.canvas) {
+      data.mask.image.data = mask.image.data.canvas.toDataURL('image/webp', 0.85);
+    }
+    downloadPresetJSON(`copo-preset-${timestamp()}.json`, data);
+  }
+
+  function importPreset() {
+    openPresetFile(
+      (data) => applyPreset(data),
+      () => setStatus('Invalid preset file')
+    );
+  }
+
+  function uploadMaskImage() {
+    openImageFile((dataURL) => {
+      p.loadImage(
+        dataURL,
+        (img) => {
+          mask.image.data = img;
+          if (mask.mode !== 'image') {
+            mask.mode = 'image';
+            syncUIFromState();
+          }
+          restartProgram();
+          saveState();
+        },
+        () => setStatus('Image load failed')
+      );
+    });
   }
 
   function loadState() {

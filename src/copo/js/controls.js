@@ -212,6 +212,7 @@ export const SECTIONS = [
       { id: 'co-mask-round', type: 'check', label: 'Round Branches', path: 'mask.branchRound', regen: 'frame' },
       { id: 'co-mask-min', type: 'slider', label: 'Mask Margin Min', path: 'mask.margin.min', min: 0, max: 1, step: 0.01, regen: 'frame' },
       { id: 'co-mask-max', type: 'slider', label: 'Mask Margin Max', path: 'mask.margin.max', min: 0, max: 1, step: 0.01, regen: 'frame' },
+      { id: 'co-mask-upload', type: 'button', label: 'Upload Mask Image' },
       { id: 'co-mask-scale', type: 'slider', label: 'Image Scale', path: 'mask.image.scale', min: 0.5, max: 2, step: 0.01, regen: 'frame' },
       { id: 'co-mask-bright', type: 'slider', label: 'Brightness', path: 'mask.image.brightness', min: -0.5, max: 0.5, step: 0.01, regen: 'frame' },
       { id: 'co-mask-contrast', type: 'slider', label: 'Contrast', path: 'mask.image.contrast', min: 0.5, max: 5, step: 0.01, regen: 'frame' },

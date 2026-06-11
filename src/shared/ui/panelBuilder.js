@@ -247,8 +247,11 @@ export function createPanelBuilder({
   return { buildControl, buildSections, syncUIFromState };
 }
 
-/** Preset dropdown section. Keys are humanized: fooBarPreset -> "Foo Bar". */
-export function buildPresetSection(root, { idPrefix, presets }) {
+/**
+ * Preset dropdown section. Keys are humanized: fooBarPreset -> "Foo Bar".
+ * Optional onExport/onImport callbacks add an Export/Import button pair.
+ */
+export function buildPresetSection(root, { idPrefix, presets, onExport, onImport }) {
   const sec = document.createElement('section');
   sec.className = 'panel-section';
   const opts = Object.keys(presets)
@@ -261,14 +264,24 @@ export function buildPresetSection(root, { idPrefix, presets }) {
       return `<option value="${key}">${label}</option>`;
     })
     .join('');
+  const ioButtons =
+    onExport || onImport
+      ? `
+        <div class="parameter-row" style="display:flex; gap:8px;">
+          ${onExport ? `<button id="${idPrefix}-preset-export" class="btn btn-secondary" style="flex:1;">Export</button>` : ''}
+          ${onImport ? `<button id="${idPrefix}-preset-import" class="btn btn-secondary" style="flex:1;">Import</button>` : ''}
+        </div>`
+      : '';
   sec.innerHTML = `
       <h2 class="section-title"><span>Preset</span></h2>
       <div class="section-content">
         <div class="parameter-row">
           <div class="parameter-header"><span class="parameter-label">Preset List</span></div>
           <select class="grafema-select" id="${idPrefix}-preset">${opts}</select>
-        </div>
+        </div>${ioButtons}
       </div>`;
+  if (onExport) sec.querySelector(`#${idPrefix}-preset-export`).addEventListener('click', onExport);
+  if (onImport) sec.querySelector(`#${idPrefix}-preset-import`).addEventListener('click', onImport);
   root.appendChild(sec);
 }
 

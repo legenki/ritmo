@@ -10,6 +10,7 @@ import { baseVert, blurFrag, grainFrag } from './shaders.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
+import { downloadPresetJSON, openPresetFile } from '../../shared/utils/presetIO.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -124,7 +125,12 @@ export function borroSketch(p) {
     const root = document.getElementById('bo-controls');
     if (!root) return;
     root.innerHTML = '';
-    buildPresetSection(root, { idPrefix: 'bo', presets: PRESETS });
+    buildPresetSection(root, {
+      idPrefix: 'bo',
+      presets: PRESETS,
+      onExport: exportPreset,
+      onImport: importPreset,
+    });
     panel.buildSections(root, SECTIONS);
     openSections(root, [0, 1]);
     refreshVisibility();
@@ -956,33 +962,47 @@ export function borroSketch(p) {
   }
 
   // ---- Persistence ----
+  function serializeState() {
+    return {
+      cnv: {
+        ratio: cnv.ratio,
+        blend: cnv.blend,
+        scale: { x: cnv.scale.x, y: cnv.scale.y },
+        seed: { base: cnv.seed.base },
+      },
+      svg: { seed: svg.seed, sort: svg.sort, shape: svg.shape },
+      form,
+      post,
+      palette: {
+        type: palette.type,
+        custom: palette.custom,
+        bg: palette.bg,
+        offset: palette.offset,
+        amp: palette.amp,
+        freq: palette.freq,
+        phase: palette.phase,
+      },
+      rec: { length: { value: rec.length.value } },
+    };
+  }
+
   let saveTimer = null;
   function saveState() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const data = {
-        cnv: {
-          ratio: cnv.ratio,
-          blend: cnv.blend,
-          scale: { x: cnv.scale.x, y: cnv.scale.y },
-          seed: { base: cnv.seed.base },
-        },
-        svg: { seed: svg.seed, sort: svg.sort, shape: svg.shape },
-        form,
-        post,
-        palette: {
-          type: palette.type,
-          custom: palette.custom,
-          bg: palette.bg,
-          offset: palette.offset,
-          amp: palette.amp,
-          freq: palette.freq,
-          phase: palette.phase,
-        },
-        rec: { length: { value: rec.length.value } },
-      };
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
     }, 500);
+  }
+
+  function exportPreset() {
+    downloadPresetJSON(`borro-preset-${timestamp()}.json`, serializeState());
+  }
+
+  function importPreset() {
+    openPresetFile(
+      (data) => applyPreset(data),
+      () => setStatus('Invalid preset file')
+    );
   }
 
   function loadState() {

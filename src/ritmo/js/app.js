@@ -8,6 +8,7 @@ import { SECTIONS, COLOR_SECTIONS } from './controls.js';
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
+import { downloadPresetJSON, openPresetFile } from '../../shared/utils/presetIO.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -123,7 +124,12 @@ export function ritmoSketch(p) {
     const root = document.getElementById('ri-controls');
     if (!root) return;
     root.innerHTML = '';
-    buildPresetSection(root, { idPrefix: 'ri', presets: PRESETS });
+    buildPresetSection(root, {
+      idPrefix: 'ri',
+      presets: PRESETS,
+      onExport: exportPreset,
+      onImport: importPreset,
+    });
     panel.buildSections(root, SECTIONS);
     buildPaletteSection(root);
     panel.buildSections(root, COLOR_SECTIONS);
@@ -644,48 +650,62 @@ export function ritmoSketch(p) {
   }
 
   // ---- Persistence ----
+  function serializeState() {
+    return {
+      seed: { ...seed },
+      cnv: {
+        ratio: cnv.ratio,
+        rotate: cnv.rotate,
+        offset: cnv.offset,
+        scale: { x: cnv.scale.x, y: cnv.scale.y },
+      },
+      form: {
+        type: form.type,
+        stripe: { width: form.stripe.width },
+        amount: { value: form.amount.value },
+        quality: { value: form.quality.value },
+        amp: { x: form.amp.x, y: form.amp.y },
+        freq: { x: form.freq.x, y: form.freq.y },
+        speed: { x: form.speed.x, y: form.speed.y },
+      },
+      palette: { total: palette.total, base: palette.base },
+      bg: { mode: bg.mode, array: bg.array, gradient: { angle: bg.gradient.angle } },
+      graphics: {
+        fill: {
+          mode: graphics.fill.mode,
+          sort: graphics.fill.sort,
+          array: graphics.fill.array,
+        },
+        stroke: {
+          mode: graphics.stroke.mode,
+          sort: graphics.stroke.sort,
+          array: graphics.stroke.array,
+          weight: graphics.stroke.weight,
+          dash: graphics.stroke.dash,
+          gap: graphics.stroke.gap,
+        },
+      },
+      rec: { length: { value: rec.length.value } },
+    };
+  }
+
   let saveTimer = null;
   function saveState() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const data = {
-        seed: { ...seed },
-        cnv: {
-          ratio: cnv.ratio,
-          rotate: cnv.rotate,
-          offset: cnv.offset,
-          scale: { x: cnv.scale.x, y: cnv.scale.y },
-        },
-        form: {
-          type: form.type,
-          stripe: { width: form.stripe.width },
-          amount: { value: form.amount.value },
-          quality: { value: form.quality.value },
-          amp: { x: form.amp.x, y: form.amp.y },
-          freq: { x: form.freq.x, y: form.freq.y },
-          speed: { x: form.speed.x, y: form.speed.y },
-        },
-        palette: { total: palette.total, base: palette.base },
-        bg: { mode: bg.mode, array: bg.array, gradient: { angle: bg.gradient.angle } },
-        graphics: {
-          fill: {
-            mode: graphics.fill.mode,
-            sort: graphics.fill.sort,
-            array: graphics.fill.array,
-          },
-          stroke: {
-            mode: graphics.stroke.mode,
-            sort: graphics.stroke.sort,
-            array: graphics.stroke.array,
-            weight: graphics.stroke.weight,
-            dash: graphics.stroke.dash,
-            gap: graphics.stroke.gap,
-          },
-        },
-        rec: { length: { value: rec.length.value } },
-      };
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
     }, 500);
+  }
+
+  function exportPreset() {
+    downloadPresetJSON(`ritmo-preset-${timestamp()}.json`, serializeState());
+  }
+
+  function importPreset() {
+    openPresetFile(
+      (data) => applyPreset(data),
+      () => setStatus('Invalid preset file')
+    );
   }
 
   function loadState() {

@@ -9,6 +9,7 @@ import { boxShaderCode, flowShaderCode, sineShaderCode, refractShaderCode } from
 import { safeStorage } from '../../shared/utils/storage.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
+import { downloadPresetJSON, openPresetFile, openImageFile } from '../../shared/utils/presetIO.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -116,7 +117,12 @@ export function refracSketch(p) {
     const root = document.getElementById('re-controls');
     if (!root) return;
     root.innerHTML = '';
-    buildPresetSection(root, { idPrefix: 're', presets: PRESETS });
+    buildPresetSection(root, {
+      idPrefix: 're',
+      presets: PRESETS,
+      onExport: exportPreset,
+      onImport: importPreset,
+    });
     panel.buildSections(root, SECTIONS);
     openSections(root, [0, 1, 2]);
     refreshVisibility();
@@ -126,6 +132,9 @@ export function refracSketch(p) {
     switch (ctrl.id) {
       case 're-random-image':
         loadRandomImage();
+        break;
+      case 're-upload-image':
+        uploadImage();
         break;
     }
     switch (ctrl.regen) {
@@ -439,25 +448,57 @@ export function refracSketch(p) {
   }
 
   // ---- Persistence ----
+  function serializeState() {
+    return {
+      cnv: {
+        wrap: cnv.wrap,
+        scale: cnv.scale,
+        bg: cnv.bg,
+        image: { size: cnv.image.size },
+        animation: cnv.animation,
+      },
+      seed: { value: seed.value },
+      displace,
+      refract,
+      rec: { length: { value: rec.length.value } },
+    };
+  }
+
   let saveTimer = null;
   function saveState() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const data = {
-        cnv: {
-          wrap: cnv.wrap,
-          scale: cnv.scale,
-          bg: cnv.bg,
-          image: { size: cnv.image.size },
-          animation: cnv.animation,
-        },
-        seed: { value: seed.value },
-        displace,
-        refract,
-        rec: { length: { value: rec.length.value } },
-      };
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
     }, 500);
+  }
+
+  function exportPreset() {
+    downloadPresetJSON(`refrac-preset-${timestamp()}.json`, serializeState());
+  }
+
+  function importPreset() {
+    openPresetFile(
+      (data) => applyPreset(data),
+      () => setStatus('Invalid preset file')
+    );
+  }
+
+  function uploadImage() {
+    openImageFile((dataURL) => {
+      isLoadingImage = true;
+      p.loadImage(
+        dataURL,
+        (img) => {
+          cnv.img = adjustImageSize(img, cnv.image.size);
+          updateCanvas();
+          isLoadingImage = false;
+        },
+        () => {
+          setStatus('Image load failed');
+          isLoadingImage = false;
+        }
+      );
+    });
   }
 
   function loadState() {

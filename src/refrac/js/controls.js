@@ -5,6 +5,7 @@ export const SECTIONS = [
     title: 'Image',
     controls: [
       { id: 're-random-image', type: 'button', label: 'Load Random Image' },
+      { id: 're-upload-image', type: 'button', label: 'Upload Image' },
       {
         id: 're-image-size',
         type: 'select',
