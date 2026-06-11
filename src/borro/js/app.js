@@ -110,6 +110,7 @@ export function borroSketch(p) {
   let grainShader = null;
   let palettesArray = null;
   let isReady = false;
+  let assetsReady = false;
 
   const state = { cnv, svg, form, post, palette, rec };
 
@@ -1180,37 +1181,47 @@ export function borroSketch(p) {
     seedEvent();
     isReady = true;
 
-    // Palettes and presets load async in parallel.
-    Promise.all([
-      fetch(`${import.meta.env.BASE_URL}assets/borro/palettes.json`).then((r) => r.json()),
-      fetch(`${import.meta.env.BASE_URL}assets/borro/presets.json`).then((r) => r.json()),
-    ])
-      .then(([palettesData, presetsData]) => {
-        palettesArray = Object.values(palettesData);
-        PRESETS = presetsData;
-        buildUI();
-        bindFooter();
-        if (restored) {
-          updatePalette();
-          createForms();
-          syncUIFromState();
-        } else {
-          const keys = Object.keys(PRESETS);
-          const pick = keys[Math.floor(Math.random() * keys.length)];
-          applyPreset(PRESETS[pick]);
-          const sel = document.getElementById('bo-preset');
-          if (sel) sel.value = pick;
-        }
-        if (palette.type === 'defined') {
-          updatePalette();
-          createForms();
-        }
+    // Palettes and presets load async in parallel; each failure is tolerated
+    // independently so the tool still comes up if one file is missing.
+    const palettesP = fetch(`${import.meta.env.BASE_URL}assets/borro/palettes.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        palettesArray = Object.values(data);
       })
-      .catch((e) => console.warn('[borro] assets load failed:', e));
+      .catch((e) => console.warn('[borro] palettes load failed:', e));
+    const presetsP = fetch(`${import.meta.env.BASE_URL}assets/borro/presets.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        PRESETS = data;
+      })
+      .catch((e) => console.warn('[borro] presets load failed:', e));
+
+    Promise.all([palettesP, presetsP]).then(() => {
+      buildUI();
+      bindFooter();
+      const keys = Object.keys(PRESETS);
+      if (restored) {
+        updatePalette();
+        createForms();
+        syncUIFromState();
+      } else if (keys.length) {
+        const pick = keys[Math.floor(Math.random() * keys.length)];
+        applyPreset(PRESETS[pick]);
+        const sel = document.getElementById('bo-preset');
+        if (sel) sel.value = pick;
+      } else {
+        randomParams();
+      }
+      if (palette.type === 'defined') {
+        updatePalette();
+        createForms();
+      }
+      assetsReady = true;
+    });
   };
 
   p.draw = () => {
-    if (!gForm || !blurBuffer || !grainBuffer) return;
+    if (!assetsReady || !gForm || !blurBuffer || !grainBuffer) return;
     drawComposite();
     if (cnv.animation) {
       const total = rec.length.value * rec.frameRate;

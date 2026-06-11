@@ -48,6 +48,9 @@ export default defineConfig({
         enabled: true,
       },
       workbox: {
+        // Include workspace assets (presets/palettes JSON, mask/default images)
+        // so lazily fetched data works offline too.
+        globPatterns: ['**/*.{js,css,html,svg,json,webp}'],
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10MB
         cleanupOutdatedCaches: true,
         skipWaiting: true,

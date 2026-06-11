@@ -114,6 +114,7 @@ export function ritmoSketch(p) {
   let simplex = null;
   let formQuality = 0;
   let gForm = null;
+  let isReady = false;
 
   const state = { seed, cnv, form, palette, bg, graphics, rec };
 
@@ -1126,29 +1127,38 @@ export function ritmoSketch(p) {
     arrayUpdate();
     noiseSeedUpdate();
 
+    // The UI and first render wait for the presets fetch but must not depend
+    // on its success — a failed fetch still yields a working tool.
     fetch(`${import.meta.env.BASE_URL}assets/ritmo/presets.json`)
       .then((r) => r.json())
       .then((data) => {
         PRESETS = data;
+      })
+      .catch((e) => console.warn('[ritmo] presets load failed:', e))
+      .finally(() => {
         buildUI();
         bindFooter();
+        const keys = Object.keys(PRESETS);
         if (restored) {
           setupBuffers();
           updateColors();
           syncUIFromState();
-        } else {
-          const keys = Object.keys(PRESETS);
+        } else if (keys.length) {
           const pick = keys[Math.floor(Math.random() * keys.length)];
           applyPreset(PRESETS[pick]);
           const sel = document.getElementById('ri-preset');
           if (sel) sel.value = pick;
+        } else {
+          // No presets available: generate a random full state so the color
+          // arrays the draw loop reads are never empty.
+          randomParams();
         }
-      })
-      .catch((e) => console.warn('[ritmo] presets load failed:', e));
+        isReady = true;
+      });
   };
 
   p.draw = () => {
-    if (!gForm) return;
+    if (!isReady || !gForm) return;
     drawFrame(gForm);
 
     p.clear();

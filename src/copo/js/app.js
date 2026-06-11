@@ -1257,28 +1257,34 @@ export function copoSketch(p) {
       if (mask.mode === 'image') restartProgram();
     });
 
-    Promise.all([
-      fetch(`${import.meta.env.BASE_URL}assets/copo/palettes.json`).then((r) => r.json()),
-      fetch(`${import.meta.env.BASE_URL}assets/copo/presets.json`).then((r) => r.json()),
-    ])
-      .then(([palettesData, presetsData]) => {
-        palette.data = palettesData;
-        PRESETS = presetsData;
-        buildUI();
-        bindFooter();
-        if (restored) {
-          populatePaletteColors();
-          restartProgram();
-          syncUIFromState();
-        } else {
-          const keys = Object.keys(PRESETS);
-          const pick = keys[Math.floor(Math.random() * keys.length)];
-          applyPreset(PRESETS[pick]);
-          const sel = document.getElementById('co-preset');
-          if (sel) sel.value = pick;
-        }
+    const palettesP = fetch(`${import.meta.env.BASE_URL}assets/copo/palettes.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        palette.data = data;
       })
-      .catch((e) => console.warn('[copo] assets load failed:', e));
+      .catch((e) => console.warn('[copo] palettes load failed:', e));
+    const presetsP = fetch(`${import.meta.env.BASE_URL}assets/copo/presets.json`)
+      .then((r) => r.json())
+      .then((data) => {
+        PRESETS = data;
+      })
+      .catch((e) => console.warn('[copo] presets load failed:', e));
+
+    Promise.all([palettesP, presetsP]).then(() => {
+      buildUI();
+      bindFooter();
+      const keys = Object.keys(PRESETS);
+      if (restored || !keys.length) {
+        populatePaletteColors();
+        restartProgram();
+        syncUIFromState();
+      } else {
+        const pick = keys[Math.floor(Math.random() * keys.length)];
+        applyPreset(PRESETS[pick]);
+        const sel = document.getElementById('co-preset');
+        if (sel) sel.value = pick;
+      }
+    });
   };
 
   p.draw = () => {

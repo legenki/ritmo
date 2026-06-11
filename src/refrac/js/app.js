@@ -636,10 +636,13 @@ export function refracSketch(p) {
       .then((r) => r.json())
       .then((data) => {
         PRESETS = data;
+      })
+      .catch((e) => console.warn('[refrac] presets load failed:', e))
+      .finally(() => {
         buildUI();
         bindFooter();
-        if (!restored) {
-          const keys = Object.keys(PRESETS);
+        const keys = Object.keys(PRESETS);
+        if (!restored && keys.length) {
           const pick = keys[Math.floor(Math.random() * keys.length)];
           applyPreset(PRESETS[pick]);
           const sel = document.getElementById('re-preset');
@@ -647,8 +650,7 @@ export function refracSketch(p) {
         } else {
           syncUIFromState();
         }
-      })
-      .catch((e) => console.warn('[refrac] presets load failed:', e));
+      });
   };
 
   p.draw = () => {
