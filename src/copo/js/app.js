@@ -695,14 +695,18 @@ export function copoSketch(p) {
 
       switch (params.color.type) {
         case 'color':
-          frameData.color[i] = params.color.base;
+          frameData.color[i] = params.color.base || '#000000';
           break;
         case 'sequence':
-          frameData.color[i] = palette.temp[colorIndex];
+          frameData.color[i] = palette.temp[colorIndex] || '#000000';
+          // Defensive check if it's an array (shouldn't happen but protects against state desync)
+          if (Array.isArray(frameData.color[i])) frameData.color[i] = frameData.color[i][0];
           break;
         case 'transition':
-          frameData.color[i] = paletteLerp(palette.temp, sNoise);
+          frameData.color[i] = paletteLerp(palette.temp, sNoise) || '#000000';
           break;
+        default:
+          frameData.color[i] = '#000000';
       }
 
       if (frameData.randomColor[i] > frameData.colorRatio) {
