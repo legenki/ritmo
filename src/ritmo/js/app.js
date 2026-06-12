@@ -5,10 +5,11 @@
 import { createMap2 } from './map2.js';
 import { Gradient } from './gradient.js';
 import { SECTIONS, COLOR_SECTIONS } from './controls.js';
-import { safeStorage } from '../../shared/utils/storage.js';
+import { createPersistence } from '../../shared/utils/persistence.js';
 import { ensureHME } from '../../shared/utils/lazyLibs.js';
 import { timestamp } from '../../shared/utils/datetime.js';
 import { downloadPresetJSON, openPresetFile } from '../../shared/utils/presetIO.js';
+import { deepMerge } from '../../shared/utils/deepMerge.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -635,21 +636,6 @@ export function ritmoSketch(p) {
     saveState();
   }
 
-  function deepMerge(target, src) {
-    if (!src || typeof src !== 'object') return;
-    for (const key of Object.keys(src)) {
-      const v = src[key];
-      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-        if (!target[key] || typeof target[key] !== 'object') target[key] = {};
-        deepMerge(target[key], v);
-      } else if (Array.isArray(v)) {
-        target[key] = v.slice();
-      } else {
-        target[key] = v;
-      }
-    }
-  }
-
   // ---- Persistence ----
   function serializeState() {
     return {
@@ -690,13 +676,20 @@ export function ritmoSketch(p) {
     };
   }
 
-  let saveTimer = null;
-  function saveState() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
-    }, 500);
-  }
+  const { saveState, loadState } = createPersistence(
+    STORAGE_KEY,
+    'ritmo',
+    serializeState,
+    (data) => {
+      deepMerge(seed, data.seed);
+      deepMerge(cnv, data.cnv);
+      deepMerge(form, data.form);
+      deepMerge(palette, data.palette);
+      deepMerge(bg, data.bg);
+      deepMerge(graphics, data.graphics);
+      deepMerge(rec, data.rec);
+    }
+  );
 
   function exportPreset() {
     downloadPresetJSON(`ritmo-preset-${timestamp()}.json`, serializeState());
@@ -709,24 +702,6 @@ export function ritmoSketch(p) {
     );
   }
 
-  function loadState() {
-    try {
-      const raw = safeStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      deepMerge(seed, data.seed);
-      deepMerge(cnv, data.cnv);
-      deepMerge(form, data.form);
-      deepMerge(palette, data.palette);
-      deepMerge(bg, data.bg);
-      deepMerge(graphics, data.graphics);
-      deepMerge(rec, data.rec);
-      return true;
-    } catch (e) {
-      console.warn('[ritmo] state restore failed:', e);
-      return false;
-    }
-  }
 
   // ---- Canvas / buffers ----
   function setupBuffers() {

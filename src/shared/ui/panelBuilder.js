@@ -21,8 +21,45 @@ export function setByPath(root, path, value) {
   obj[last] = value;
 }
 
-const CHEVRON = `
-        <svg class="chevron-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'className') node.className = v;
+    else if (k === 'style') node.style.cssText = v;
+    else if (k === 'textContent') node.textContent = v;
+    else if (k === 'checked') node.checked = v;
+    else if (k === 'title') node.title = v;
+    else node.setAttribute(k, v);
+  }
+  for (const child of children) {
+    if (child == null) continue;
+    node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
+  }
+  return node;
+}
+
+function chevronSVG() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'chevron-icon');
+  svg.setAttribute('width', '10');
+  svg.setAttribute('height', '10');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2.5');
+  const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  poly.setAttribute('points', '6 9 12 15 18 9');
+  svg.appendChild(poly);
+  return svg;
+}
+
+function sliderAttrs(ctrl, val) {
+  return { type: 'range', class: 'custom-slider', id: ctrl.id, min: ctrl.min, max: ctrl.max, step: ctrl.step, value: val };
+}
+
+function numAttrs(ctrl, val) {
+  return { type: 'number', class: 'grafema-num-input', id: `${ctrl.id}-num`, min: ctrl.min, max: ctrl.max, step: ctrl.step, value: val };
+}
 
 /**
  * Creates the builder bound to one workspace.
@@ -42,32 +79,31 @@ export function createPanelBuilder({
   onSliderInput,
 }) {
   function buildControl(ctrl, compact = false) {
-    const row = document.createElement('div');
-    row.className = compact && ctrl.type === 'slider' ? 'parameter-row compact' : 'parameter-row';
-    row.dataset.controlId = ctrl.id;
-    if (ctrl.group) row.dataset.group = ctrl.group;
+    const row = el('div', {
+      className: compact && ctrl.type === 'slider' ? 'parameter-row compact' : 'parameter-row',
+      'data-control-id': ctrl.id,
+      ...(ctrl.group ? { 'data-group': ctrl.group } : {}),
+    });
     const val = ctrl.path ? getByPath(state, ctrl.path) : undefined;
 
     if (ctrl.type === 'slider') {
+      const slide = el('input', sliderAttrs(ctrl, val));
+      const numWrap = el('div', { className: 'num-input-wrapper' }, el('input', numAttrs(ctrl, val)));
+      const num = numWrap.querySelector('input');
+
       if (compact) {
-        row.innerHTML = `
-          <span class="parameter-label">${ctrl.label}</span>
-          <input type="range" class="custom-slider" id="${ctrl.id}" min="${ctrl.min}" max="${ctrl.max}" step="${ctrl.step}" value="${val}">
-          <div class="num-input-wrapper">
-            <input type="number" class="grafema-num-input" id="${ctrl.id}-num" min="${ctrl.min}" max="${ctrl.max}" step="${ctrl.step}" value="${val}">
-          </div>`;
+        row.appendChild(el('span', { className: 'parameter-label', textContent: ctrl.label }));
+        row.appendChild(slide);
+        row.appendChild(numWrap);
       } else {
-        row.innerHTML = `
-          <div class="parameter-header">
-            <span class="parameter-label">${ctrl.label}</span>
-            <div class="num-input-wrapper">
-              <input type="number" class="grafema-num-input" id="${ctrl.id}-num" min="${ctrl.min}" max="${ctrl.max}" step="${ctrl.step}" value="${val}">
-            </div>
-          </div>
-          <input type="range" class="custom-slider" id="${ctrl.id}" min="${ctrl.min}" max="${ctrl.max}" step="${ctrl.step}" value="${val}">`;
+        const header = el('div', { className: 'parameter-header' },
+          el('span', { className: 'parameter-label', textContent: ctrl.label }),
+          numWrap,
+        );
+        row.appendChild(header);
+        row.appendChild(slide);
       }
-      const slide = row.querySelector(`#${ctrl.id}`);
-      const num = row.querySelector(`#${ctrl.id}-num`);
+
       slide.addEventListener('input', (e) => {
         const n = parseFloat(e.target.value);
         num.value = n;
@@ -83,57 +119,67 @@ export function createPanelBuilder({
         if (onSliderInput) onSliderInput(ctrl, n);
         applyChange(ctrl);
       });
+
     } else if (ctrl.type === 'select') {
-      const opts = Object.entries(ctrl.options)
-        .map(
-          ([label, v]) => `<option value="${v}"${v === val ? ' selected' : ''}>${label}</option>`
-        )
-        .join('');
-      row.innerHTML = `
-        <div class="parameter-header"><span class="parameter-label">${ctrl.label}</span></div>
-        <select class="grafema-select" id="${ctrl.id}">${opts}</select>`;
-      row.querySelector(`#${ctrl.id}`).addEventListener('change', (e) => {
+      const header = el('div', { className: 'parameter-header' },
+        el('span', { className: 'parameter-label', textContent: ctrl.label }),
+      );
+      const select = el('select', { className: 'grafema-select', id: ctrl.id });
+      for (const [label, v] of Object.entries(ctrl.options)) {
+        const opt = el('option', { value: v }, label);
+        if (v === val) opt.selected = true;
+        select.appendChild(opt);
+      }
+      row.appendChild(header);
+      row.appendChild(select);
+      select.addEventListener('change', (e) => {
         setByPath(state, ctrl.path, e.target.value);
         applyChange(ctrl);
         refreshVisibility();
       });
+
     } else if (ctrl.type === 'check') {
-      row.innerHTML = `
-        <label class="checkbox-container">
-          <input type="checkbox" id="${ctrl.id}"${val ? ' checked' : ''}>
-          <span class="custom-checkbox"></span>
-          <span>${ctrl.label}</span>
-        </label>`;
-      row.querySelector(`#${ctrl.id}`).addEventListener('change', (e) => {
+      const checkbox = el('input', { type: 'checkbox', id: ctrl.id, checked: !!val });
+      const label = el('label', { className: 'checkbox-container' },
+        checkbox,
+        el('span', { className: 'custom-checkbox' }),
+        el('span', { textContent: ctrl.label }),
+      );
+      row.appendChild(label);
+      checkbox.addEventListener('change', (e) => {
         setByPath(state, ctrl.path, e.target.checked);
         applyChange(ctrl);
         refreshVisibility();
       });
+
     } else if (ctrl.type === 'color') {
+      const header = el('div', { className: 'parameter-header' },
+        el('span', { className: 'parameter-label', textContent: ctrl.label }),
+      );
+      row.appendChild(header);
+
       if (colorStyle === 'alpha') {
         // Colors are #RRGGBBAA. <input type=color> only does #RRGGBB, so keep
         // alpha in state and show a separate alpha slider.
         const hex6 = String(val).slice(0, 7);
         const aHex = String(val).length >= 9 ? String(val).slice(7, 9) : 'FF';
         const aVal = parseInt(aHex, 16) / 255;
-        row.innerHTML = `
-        <div class="parameter-header"><span class="parameter-label">${ctrl.label}</span></div>
-        <div class="color-picker-wrapper">
-          <input type="color" id="${ctrl.id}" value="${hex6}">
-          <input type="range" id="${ctrl.id}-a" min="0" max="1" step="0.01" value="${aVal}" class="custom-slider" style="flex:1; margin-left:8px;" title="Alpha">
-        </div>`;
+        const colorInput = el('input', { type: 'color', id: ctrl.id, value: hex6 });
+        const alphaSlider = el('input', {
+          type: 'range', id: `${ctrl.id}-a`, min: '0', max: '1', step: '0.01',
+          value: aVal, class: 'custom-slider', style: 'flex:1; margin-left:8px;', title: 'Alpha',
+        });
+        const wrapper = el('div', { className: 'color-picker-wrapper' }, colorInput, alphaSlider);
+        row.appendChild(wrapper);
         const update = () => {
-          const c = row.querySelector(`#${ctrl.id}`).value;
-          const a = parseFloat(row.querySelector(`#${ctrl.id}-a`).value);
-          const aH = Math.round(a * 255)
-            .toString(16)
-            .padStart(2, '0')
-            .toUpperCase();
+          const c = colorInput.value;
+          const a = parseFloat(alphaSlider.value);
+          const aH = Math.round(a * 255).toString(16).padStart(2, '0').toUpperCase();
           setByPath(state, ctrl.path, c.toUpperCase() + aH);
           applyChange(ctrl);
         };
-        row.querySelector(`#${ctrl.id}`).addEventListener('input', update);
-        row.querySelector(`#${ctrl.id}-a`).addEventListener('input', update);
+        colorInput.addEventListener('input', update);
+        alphaSlider.addEventListener('input', update);
       } else {
         const hex =
           colorStyle === 'code-upper'
@@ -141,39 +187,45 @@ export function createPanelBuilder({
             : String(val).startsWith('#')
               ? val
               : '#000000';
-        row.innerHTML = `
-        <div class="parameter-header"><span class="parameter-label">${ctrl.label}</span></div>
-        <div class="color-picker-wrapper">
-          <input type="color" id="${ctrl.id}" value="${hex}">
-          <span class="color-code" id="${ctrl.id}-code">${hex.toUpperCase()}</span>
-        </div>`;
-        const code = row.querySelector(`#${ctrl.id}-code`);
-        row.querySelector(`#${ctrl.id}`).addEventListener('input', (e) => {
+        const colorInput = el('input', { type: 'color', id: ctrl.id, value: hex });
+        const code = el('span', { className: 'color-code', id: `${ctrl.id}-code`, textContent: hex.toUpperCase() });
+        const wrapper = el('div', { className: 'color-picker-wrapper' }, colorInput, code);
+        row.appendChild(wrapper);
+        colorInput.addEventListener('input', (e) => {
           const stored = colorStyle === 'code-upper' ? e.target.value.toUpperCase() : e.target.value;
           setByPath(state, ctrl.path, stored);
-          code.innerText = e.target.value.toUpperCase();
+          code.textContent = e.target.value.toUpperCase();
           applyChange(ctrl);
         });
       }
+
     } else if (ctrl.type === 'text') {
-      row.innerHTML = `
-        <div class="parameter-header"><span class="parameter-label">${ctrl.label}</span></div>
-        <input type="text" class="grafema-text-input" id="${ctrl.id}" value="${String(val).replace(/"/g, '&quot;')}">`;
-      row.querySelector(`#${ctrl.id}`).addEventListener('input', (e) => {
+      const header = el('div', { className: 'parameter-header' },
+        el('span', { className: 'parameter-label', textContent: ctrl.label }),
+      );
+      const input = el('input', { type: 'text', class: 'grafema-text-input', id: ctrl.id, value: String(val) });
+      row.appendChild(header);
+      row.appendChild(input);
+      input.addEventListener('input', (e) => {
         setByPath(state, ctrl.path, e.target.value);
         applyChange(ctrl);
       });
+
     } else if (ctrl.type === 'button') {
       // Action button: no state path; the workspace dispatches on ctrl.id
       // inside its applyChange.
-      row.innerHTML = `<button id="${ctrl.id}" class="btn btn-secondary" style="width:100%;">${ctrl.label}</button>`;
-      row.querySelector(`#${ctrl.id}`).addEventListener('click', () => {
+      const btn = el('button', { id: ctrl.id, className: 'btn btn-secondary', style: 'width:100%;', textContent: ctrl.label });
+      row.appendChild(btn);
+      btn.addEventListener('click', () => {
         applyChange(ctrl);
         refreshVisibility();
       });
+
     } else if (ctrl.type === 'icon-button') {
-      row.innerHTML = `<button id="${ctrl.id}" class="btn btn-icon" title="${ctrl.label}">${ctrl.icon}</button>`;
-      row.querySelector(`#${ctrl.id}`).addEventListener('click', () => {
+      const btn = el('button', { id: ctrl.id, className: 'btn btn-icon', title: ctrl.label });
+      btn.innerHTML = ctrl.icon; // ctrl.icon is trusted SVG from our own controls.js
+      row.appendChild(btn);
+      btn.addEventListener('click', () => {
         applyChange(ctrl);
         refreshVisibility();
       });
@@ -185,14 +237,13 @@ export function createPanelBuilder({
   /** Builds all SECTIONS into root: collapsible header + control rows. */
   function buildSections(root, sections) {
     for (const section of sections) {
-      const sec = document.createElement('section');
-      sec.className = 'panel-section';
+      const sec = el('section', { className: 'panel-section' });
 
-      const h2 = document.createElement('h2');
-      h2.className = 'section-title';
-      h2.innerHTML = `<span>${section.title}</span>${CHEVRON}`;
-      const content = document.createElement('div');
-      content.className = 'section-content';
+      const h2 = el('h2', { className: 'section-title' },
+        el('span', { textContent: section.title }),
+        chevronSVG(),
+      );
+      const content = el('div', { className: 'section-content' });
       sec.classList.add('collapsed');
       h2.addEventListener('click', () => sec.classList.toggle('collapsed'));
 
@@ -202,8 +253,7 @@ export function createPanelBuilder({
         if (!row) continue;
         if ((ctrl.type === 'slider' && ctrl.pair) || (ctrl.pair && ctrl.type !== 'slider')) {
           if (!pairContainer) {
-            pairContainer = document.createElement('div');
-            pairContainer.className = 'parameter-row-group';
+            pairContainer = el('div', { className: 'parameter-row-group' });
             if (ctrl.type === 'icon-button') pairContainer.style.cssText = 'display:grid;grid-template-columns:auto 1fr;gap:8px;';
             content.appendChild(pairContainer);
           }
@@ -244,7 +294,7 @@ export function createPanelBuilder({
                 String(val).length >= 9 ? parseInt(String(val).slice(7, 9), 16) / 255 : 1;
           } else {
             const code = document.getElementById(`${ctrl.id}-code`);
-            if (code) code.innerText = String(val).toUpperCase();
+            if (code) code.textContent = String(val).toUpperCase();
           }
         }
       }
@@ -259,64 +309,90 @@ export function createPanelBuilder({
  * Optional onExport/onImport callbacks add an Export/Import button pair.
  */
 export function buildPresetSection(root, { idPrefix, presets, onExport, onImport }) {
-  const sec = document.createElement('section');
-  sec.className = 'panel-section';
-  const opts = Object.keys(presets)
-    .map((key) => {
-      const label = key
-        .replace(/Preset$/, '')
-        .replace(/([A-Z])/g, ' $1')
-        .replace(/^./, (c) => c.toUpperCase())
-        .trim();
-      return `<option value="${key}">${label}</option>`;
-    })
-    .join('');
-  const ioButtons =
-    onExport || onImport
-      ? `
-        <div class="parameter-row" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          ${onExport ? `<button id="${idPrefix}-preset-export" class="btn btn-secondary">Export</button>` : ''}
-          ${onImport ? `<button id="${idPrefix}-preset-import" class="btn btn-secondary">Import</button>` : ''}
-        </div>`
-      : '';
-  sec.innerHTML = `
-      <h2 class="section-title"><span>Preset</span></h2>
-      <div class="section-content">
-        <div class="parameter-row">
-          <div class="parameter-header"><span class="parameter-label">Preset List</span></div>
-          <select class="grafema-select" id="${idPrefix}-preset">${opts}</select>
-        </div>${ioButtons}
-      </div>`;
-  if (onExport) sec.querySelector(`#${idPrefix}-preset-export`).addEventListener('click', onExport);
-  if (onImport) sec.querySelector(`#${idPrefix}-preset-import`).addEventListener('click', onImport);
+  const sec = el('section', { className: 'panel-section' });
+
+  const h2 = el('h2', { className: 'section-title' }, el('span', { textContent: 'Preset' }));
+  const select = el('select', { className: 'grafema-select', id: `${idPrefix}-preset` });
+  for (const key of Object.keys(presets)) {
+    const label = key
+      .replace(/Preset$/, '')
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, (c) => c.toUpperCase())
+      .trim();
+    select.appendChild(el('option', { value: key }, label));
+  }
+
+  const selectRow = el('div', { className: 'parameter-row' },
+    el('div', { className: 'parameter-header' }, el('span', { className: 'parameter-label', textContent: 'Preset List' })),
+    select,
+  );
+
+  const contentChildren = [selectRow];
+
+  if (onExport || onImport) {
+    const ioRow = el('div', { className: 'parameter-row', style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px;' });
+    if (onExport) {
+      const exportBtn = el('button', { id: `${idPrefix}-preset-export`, className: 'btn btn-secondary', textContent: 'Export' });
+      exportBtn.addEventListener('click', onExport);
+      ioRow.appendChild(exportBtn);
+    }
+    if (onImport) {
+      const importBtn = el('button', { id: `${idPrefix}-preset-import`, className: 'btn btn-secondary', textContent: 'Import' });
+      importBtn.addEventListener('click', onImport);
+      ioRow.appendChild(importBtn);
+    }
+    contentChildren.push(ioRow);
+  }
+
+  const content = el('div', { className: 'section-content' }, ...contentChildren);
+  sec.appendChild(h2);
+  sec.appendChild(content);
   root.appendChild(sec);
 }
 
 /** Font section: List (catalog) vs Custom (upload) toggle + font picker. */
 export function buildFontSection(root, { idPrefix, fontList, font, accept }) {
-  const sec = document.createElement('section');
-  sec.className = 'panel-section';
-  const fontOpts = fontList
-    .map((f) => `<option value="${f}"${f === font.name ? ' selected' : ''}>${f}</option>`)
-    .join('');
-  sec.innerHTML = `
-      <h2 class="section-title"><span>Font</span>${CHEVRON}
-      </h2>
-      <div class="section-content">
-        <div class="mode-selector" id="${idPrefix}-font-mode" style="margin-bottom:12px;">
-          <button class="mode-btn${font.mode === 'list' ? ' active' : ''}" data-mode="list"><span>List</span></button>
-          <button class="mode-btn${font.mode === 'custom' ? ' active' : ''}" data-mode="custom"><span>Custom</span></button>
-        </div>
-        <div class="parameter-row" id="${idPrefix}-font-list-row">
-          <div class="parameter-header"><span class="parameter-label">Choose Font</span></div>
-          <select class="grafema-select" id="${idPrefix}-font-list">${fontOpts}</select>
-        </div>
-        <div class="parameter-row" id="${idPrefix}-font-custom-row">
-          <button id="${idPrefix}-font-upload" class="btn btn-secondary" style="width:100%;">Load Local Font</button>
-          <span class="color-code" id="${idPrefix}-font-custom-name" style="display:block; margin-top:6px;">${font.customName || 'no file'}</span>
-        </div>
-        <input type="file" id="${idPrefix}-font-input" accept="${accept}" style="display:none;">
-      </div>`;
+  const sec = el('section', { className: 'panel-section' });
+
+  const h2 = el('h2', { className: 'section-title' },
+    el('span', { textContent: 'Font' }),
+    chevronSVG(),
+  );
+
+  const modeSelector = el('div', { className: 'mode-selector', id: `${idPrefix}-font-mode`, style: 'margin-bottom:12px;' });
+  for (const mode of ['list', 'custom']) {
+    const btn = el('button', { className: `mode-btn${font.mode === mode ? ' active' : ''}`, 'data-mode': mode },
+      el('span', { textContent: mode === 'list' ? 'List' : 'Custom' }),
+    );
+    modeSelector.appendChild(btn);
+  }
+
+  const fontSelect = el('select', { className: 'grafema-select', id: `${idPrefix}-font-list` });
+  for (const f of fontList) {
+    const opt = el('option', { value: f }, f);
+    if (f === font.name) opt.selected = true;
+    fontSelect.appendChild(opt);
+  }
+  const fontListRow = el('div', { className: 'parameter-row', id: `${idPrefix}-font-list-row` },
+    el('div', { className: 'parameter-header' }, el('span', { className: 'parameter-label', textContent: 'Choose Font' })),
+    fontSelect,
+  );
+
+  const uploadBtn = el('button', { id: `${idPrefix}-font-upload`, className: 'btn btn-secondary', style: 'width:100%;', textContent: 'Load Local Font' });
+  const customName = el('span', { className: 'color-code', id: `${idPrefix}-font-custom-name`, style: 'display:block; margin-top:6px;', textContent: font.customName || 'no file' });
+  const fontCustomRow = el('div', { className: 'parameter-row', id: `${idPrefix}-font-custom-row` }, uploadBtn, customName);
+
+  const fileInput = el('input', { type: 'file', id: `${idPrefix}-font-input`, accept, style: 'display:none;' });
+
+  const content = el('div', { className: 'section-content' },
+    modeSelector,
+    fontListRow,
+    fontCustomRow,
+    fileInput,
+  );
+
+  sec.appendChild(h2);
+  sec.appendChild(content);
   root.appendChild(sec);
 }
 

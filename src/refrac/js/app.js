@@ -6,10 +6,12 @@
 import { createMap2 } from '../../ritmo/js/map2.js';
 import { SECTIONS } from './controls.js';
 import { boxShaderCode, flowShaderCode, sineShaderCode, refractShaderCode } from './shaders.js';
-import { safeStorage } from '../../shared/utils/storage.js';
-import { ensureHME } from '../../shared/utils/lazyLibs.js';
+import { createPersistence } from '../../shared/utils/persistence.js';
 import { timestamp } from '../../shared/utils/datetime.js';
 import { downloadPresetJSON, openPresetFile, openImageFile } from '../../shared/utils/presetIO.js';
+import { deepMerge } from '../../shared/utils/deepMerge.js';
+import { exportPNG as sharedExportPNG, exportMP4 as sharedExportMP4 } from '../../shared/utils/exportMedia.js';
+import { createAlphaImage } from '../../shared/utils/alphaCheckerboard.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -259,7 +261,7 @@ export function refracSketch(p) {
         /* p5 Graphics.remove() can throw in instance mode */
       }
     }
-    alphaImg = createAlphaImage(cnv.img.width, cnv.img.height, 1);
+    alphaImg = createAlphaImage(p, cnv.img.width, cnv.img.height, 1);
 
     gForm = p.createFramebuffer({
       width: cnv.img.width,
@@ -272,36 +274,6 @@ export function refracSketch(p) {
     flowShader = p.createFilterShader(flowShaderCode);
     boxShader = p.createFilterShader(boxShaderCode);
     refractShader = p.createFilterShader(refractShaderCode);
-  }
-
-  // Transparency checkerboard (same construction as the other tools).
-  function createAlphaImage(width, height, density) {
-    const buffer = p.createGraphics(width, height);
-    buffer.pixelDensity(density);
-    buffer.noStroke();
-    buffer.push();
-    buffer.fill(255);
-    buffer.rect(0, 0, width, height);
-
-    const size = (height + width) / 100;
-    let xBool = true;
-    let yBool;
-    const modY = height % size;
-    const modX = width % size;
-    const divY = modY / (height / size);
-    const divX = modX / (width / size);
-
-    for (let y = 0; y < height - modY; y += size + divY) {
-      xBool = !xBool;
-      yBool = xBool;
-      for (let x = 0; x < width - modX; x += size + divX) {
-        yBool = !yBool;
-        buffer.fill(yBool ? 255 : 220);
-        buffer.rect(x, y, size + divX, size + divY);
-      }
-    }
-    buffer.pop();
-    return buffer;
   }
 
   // ---- Filters ----
@@ -431,22 +403,6 @@ export function refracSketch(p) {
     saveState();
   }
 
-  function deepMerge(target, src) {
-    if (!src || typeof src !== 'object') return;
-    for (const key of Object.keys(src)) {
-      const v = src[key];
-      if (v === undefined) continue;
-      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-        if (!target[key] || typeof target[key] !== 'object') target[key] = {};
-        deepMerge(target[key], v);
-      } else if (Array.isArray(v)) {
-        target[key] = v.slice();
-      } else {
-        target[key] = v;
-      }
-    }
-  }
-
   // ---- Persistence ----
   function serializeState() {
     return {
@@ -464,13 +420,18 @@ export function refracSketch(p) {
     };
   }
 
-  let saveTimer = null;
-  function saveState() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
-    }, 500);
-  }
+  const { saveState, loadState } = createPersistence(
+    STORAGE_KEY,
+    'refrac',
+    serializeState,
+    (data) => {
+      deepMerge(cnv, data.cnv);
+      deepMerge(seed, data.seed);
+      deepMerge(displace, data.displace);
+      deepMerge(refract, data.refract);
+      deepMerge(rec, data.rec);
+    }
+  );
 
   function exportPreset() {
     downloadPresetJSON(`refrac-preset-${timestamp()}.json`, serializeState());
@@ -501,22 +462,6 @@ export function refracSketch(p) {
     });
   }
 
-  function loadState() {
-    try {
-      const raw = safeStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      deepMerge(cnv, data.cnv);
-      deepMerge(seed, data.seed);
-      deepMerge(displace, data.displace);
-      deepMerge(refract, data.refract);
-      deepMerge(rec, data.rec);
-      return true;
-    } catch (e) {
-      console.warn('[refrac] state restore failed:', e);
-      return false;
-    }
-  }
 
   // ---- Export ----
   function setStatus(msg) {
@@ -525,83 +470,21 @@ export function refracSketch(p) {
   }
 
   function exportPNG() {
-    p.saveCanvas(`refrac-${timestamp()}`, 'png');
+    sharedExportPNG(p, 'refrac');
   }
 
-  async function exportMP4() {
-    if (recVideo.active || !cnv.img) return;
-    recVideo.active = true;
-    setStatus('Preparing video…');
-
-    const w = p.width - (p.width % 2);
-    const h = p.height - (p.height % 2);
-    const copy = document.createElement('canvas');
-    copy.width = w;
-    copy.height = h;
-    const copyCtx = copy.getContext('2d');
-
-    let encoder;
-    try {
-      encoder = await (await ensureHME()).createH264MP4Encoder();
-    } catch (e) {
-      console.error(e);
-      setStatus('Video export failed');
-      recVideo.active = false;
-      return;
-    }
-
-    encoder.outputFilename = `refrac-${timestamp()}.mp4`;
-    encoder.width = w;
-    encoder.height = h;
-    encoder.frameRate = rec.frameRate;
-    encoder.quantizationParameter = 22;
-    encoder.groupOfPictures = 1;
-    encoder.initialize();
-
-    const totalFrames = recVideo.seconds * rec.frameRate;
-    const savedFrame = cnv.frame;
-    const savedAnimation = cnv.animation;
-    cnv.animation = false;
-
-    try {
-      for (let f = 0; f < totalFrames; f++) {
-        cnv.frame = Math.round((f / totalFrames) * (rec.length.value * rec.frameRate));
-        drawComposite();
-        copyCtx.clearRect(0, 0, w, h);
-        copyCtx.drawImage(p.canvas, 0, 0, w, h);
-        const imageData = copyCtx.getImageData(0, 0, w, h);
-        encoder.addFrameRgba(imageData.data);
-        if (f % 10 === 0) setStatus(`Encoding ${f}/${totalFrames}`);
-        if (f % 15 === 0) await new Promise((r) => setTimeout(r, 0));
-      }
-
-      setStatus('Finalizing…');
-      encoder.finalize();
-      const uint8 = encoder.FS.readFile(encoder.outputFilename);
-      const blob = new Blob([uint8], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = encoder.outputFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setStatus('Video exported ✓');
-    } catch (e) {
-      console.error('[refrac] MP4 export failed:', e);
-      setStatus('Video export failed');
-    } finally {
-      try {
-        encoder.delete();
-      } catch {
-        /* */
-      }
-      cnv.frame = savedFrame;
-      cnv.animation = savedAnimation;
-      recVideo.active = false;
-      setTimeout(() => setStatus(''), 3000);
-    }
+  function exportMP4() {
+    if (!cnv.img) return;
+    return sharedExportMP4({
+      p,
+      prefix: 'refrac',
+      cnv,
+      rec,
+      recVideo,
+      drawComposite,
+      setStatus,
+      getSize: () => ({ w: p.width - (p.width % 2), h: p.height - (p.height % 2) }),
+    });
   }
 
   function bindFooter() {

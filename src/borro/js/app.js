@@ -7,10 +7,12 @@
 import { createMap2 } from '../../ritmo/js/map2.js';
 import { SECTIONS } from './controls.js';
 import { baseVert, blurFrag, grainFrag } from './shaders.js';
-import { safeStorage } from '../../shared/utils/storage.js';
-import { ensureHME } from '../../shared/utils/lazyLibs.js';
+import { createPersistence } from '../../shared/utils/persistence.js';
 import { timestamp } from '../../shared/utils/datetime.js';
 import { downloadPresetJSON, openPresetFile } from '../../shared/utils/presetIO.js';
+import { deepMerge } from '../../shared/utils/deepMerge.js';
+import { exportPNG as sharedExportPNG, exportMP4 as sharedExportMP4 } from '../../shared/utils/exportMedia.js';
+import { generatePalette, rgbToHex } from './palette.js';
 import {
   createPanelBuilder,
   buildPresetSection,
@@ -634,10 +636,11 @@ export function borroSketch(p) {
         palette.offset,
         palette.amp,
         palette.freq,
-        palette.phase
+        palette.phase,
+        p.TWO_PI
       );
 
-      gForm.fill(blend);
+      gForm.fill(p.color(blend.r, blend.g, blend.b));
     }
 
     customColor(frame, usePalette) {
@@ -729,9 +732,10 @@ export function borroSketch(p) {
           palette.offset,
           palette.amp,
           palette.freq,
-          palette.phase
+          palette.phase,
+          p.TWO_PI
         );
-        const genHex = rgbToHex(bgRandom.levels);
+        const genHex = rgbToHex(bgRandom.r, bgRandom.g, bgRandom.b);
         const genHue = new Color(genHex).to('lch');
         const genLight = p.map(simplex.noise2D(-23054.1, 9081.4), -1, 1, 0.84, 0.99);
         const genColor = p.map(simplex.noise2D(71536.2, -17623.1), -1, 1, 0, 0.11);
@@ -790,28 +794,6 @@ export function borroSketch(p) {
     return mixedColor(index).toString({ format: 'hex' });
   }
 
-  function generatePalette(t, a, b, c, d) {
-    const vec3 = (x, y, z) => ({ x, y, z });
-    const addVec3 = (v1, v2) => vec3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
-    const cosVec3 = (v) => vec3(Math.cos(v.x), Math.cos(v.y), Math.cos(v.z));
-    const mulVec3 = (v, s) => vec3(v.x * s, v.y * s, v.z * s);
-    const mulCw = (v1, v2) => vec3(v1.x * v2.x, v1.y * v2.y, v1.z * v2.z);
-
-    const term1 = addVec3(d, mulCw(c, vec3(t, t, t)));
-    const term2 = cosVec3(mulVec3(term1, p.TWO_PI));
-    const result = addVec3(a, mulCw(b, term2));
-
-    return p.color(result.x * 255, result.y * 255, result.z * 255);
-  }
-
-  function componentToHex(c) {
-    const hex = c.toString(16);
-    return hex.length === 1 ? '0' + hex : hex;
-  }
-
-  function rgbToHex(c) {
-    return '#' + componentToHex(c[0]) + componentToHex(c[1]) + componentToHex(c[2]);
-  }
 
   // ---- Random settings ----
   function randomCount() {
@@ -947,21 +929,6 @@ export function borroSketch(p) {
     saveState();
   }
 
-  function deepMerge(target, src) {
-    if (!src || typeof src !== 'object') return;
-    for (const key of Object.keys(src)) {
-      const v = src[key];
-      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-        if (!target[key] || typeof target[key] !== 'object') target[key] = {};
-        deepMerge(target[key], v);
-      } else if (Array.isArray(v)) {
-        target[key] = JSON.parse(JSON.stringify(v));
-      } else {
-        target[key] = v;
-      }
-    }
-  }
-
   // ---- Persistence ----
   function serializeState() {
     return {
@@ -987,13 +954,19 @@ export function borroSketch(p) {
     };
   }
 
-  let saveTimer = null;
-  function saveState() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
-    }, 500);
-  }
+  const { saveState, loadState } = createPersistence(
+    STORAGE_KEY,
+    'borro',
+    serializeState,
+    (data) => {
+      deepMerge(cnv, data.cnv);
+      deepMerge(svg, data.svg);
+      deepMerge(form, data.form);
+      deepMerge(post, data.post);
+      deepMerge(palette, data.palette);
+      deepMerge(rec, data.rec);
+    }
+  );
 
   function exportPreset() {
     downloadPresetJSON(`borro-preset-${timestamp()}.json`, serializeState());
@@ -1006,23 +979,6 @@ export function borroSketch(p) {
     );
   }
 
-  function loadState() {
-    try {
-      const raw = safeStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      deepMerge(cnv, data.cnv);
-      deepMerge(svg, data.svg);
-      deepMerge(form, data.form);
-      deepMerge(post, data.post);
-      deepMerge(palette, data.palette);
-      deepMerge(rec, data.rec);
-      return true;
-    } catch (e) {
-      console.warn('[borro] state restore failed:', e);
-      return false;
-    }
-  }
 
   // ---- Export ----
   function setStatus(msg) {
@@ -1031,84 +987,11 @@ export function borroSketch(p) {
   }
 
   function exportPNG() {
-    p.saveCanvas(`borro-${timestamp()}`, 'png');
+    sharedExportPNG(p, 'borro');
   }
 
-  async function exportMP4() {
-    if (recVideo.active) return;
-    recVideo.active = true;
-    setStatus('Preparing video…');
-
-    // Read the WEBGL canvas through a 2D buffer (getImageData needs a 2D ctx).
-    const w = p.width * cnv.density.base;
-    const h = p.height * cnv.density.base;
-    const copy = document.createElement('canvas');
-    copy.width = w;
-    copy.height = h;
-    const copyCtx = copy.getContext('2d');
-
-    let encoder;
-    try {
-      encoder = await (await ensureHME()).createH264MP4Encoder();
-    } catch (e) {
-      console.error(e);
-      setStatus('Video export failed');
-      recVideo.active = false;
-      return;
-    }
-
-    encoder.outputFilename = `borro-${timestamp()}.mp4`;
-    encoder.width = w;
-    encoder.height = h;
-    encoder.frameRate = rec.frameRate;
-    encoder.quantizationParameter = 22;
-    encoder.groupOfPictures = 1;
-    encoder.initialize();
-
-    const totalFrames = recVideo.seconds * rec.frameRate;
-    const savedFrame = cnv.frame;
-    const savedAnimation = cnv.animation;
-    cnv.animation = false;
-
-    try {
-      for (let f = 0; f < totalFrames; f++) {
-        cnv.frame = Math.round((f / totalFrames) * (rec.length.value * rec.frameRate));
-        drawComposite();
-        copyCtx.clearRect(0, 0, w, h);
-        copyCtx.drawImage(p.canvas, 0, 0, w, h);
-        const imageData = copyCtx.getImageData(0, 0, w, h);
-        encoder.addFrameRgba(imageData.data);
-        if (f % 10 === 0) setStatus(`Encoding ${f}/${totalFrames}`);
-        if (f % 15 === 0) await new Promise((r) => setTimeout(r, 0));
-      }
-
-      setStatus('Finalizing…');
-      encoder.finalize();
-      const uint8 = encoder.FS.readFile(encoder.outputFilename);
-      const blob = new Blob([uint8], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = encoder.outputFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setStatus('Video exported ✓');
-    } catch (e) {
-      console.error('[borro] MP4 export failed:', e);
-      setStatus('Video export failed');
-    } finally {
-      try {
-        encoder.delete();
-      } catch {
-        /* */
-      }
-      cnv.frame = savedFrame;
-      cnv.animation = savedAnimation;
-      recVideo.active = false;
-      setTimeout(() => setStatus(''), 3000);
-    }
+  function exportMP4() {
+    return sharedExportMP4({ p, prefix: 'borro', cnv, rec, recVideo, drawComposite, setStatus });
   }
 
   function bindFooter() {

@@ -7,16 +7,24 @@
 import { easeFunctions } from './ease.js';
 import { shapeTypesData } from './shapes.js';
 import { SECTIONS } from './controls.js';
-import { safeStorage } from '../../shared/utils/storage.js';
-import { ensureHME } from '../../shared/utils/lazyLibs.js';
+import { createPersistence } from '../../shared/utils/persistence.js';
 import { timestamp } from '../../shared/utils/datetime.js';
 import { saveSVG } from '../../shared/utils/svgDownload.js';
 import { downloadPresetJSON, openPresetFile, openImageFile } from '../../shared/utils/presetIO.js';
+import { exportPNG as sharedExportPNG, exportMP4 as sharedExportMP4 } from '../../shared/utils/exportMedia.js';
+import { createAlphaImage } from '../../shared/utils/alphaCheckerboard.js';
 import {
   createPanelBuilder,
   buildPresetSection,
   openSections,
 } from '../../shared/ui/panelBuilder.js';
+import {
+  maxTileDistance,
+  getCanvasOffset,
+  generateSeedGrid,
+  generatePoints,
+  deepMerge,
+} from './geometry.js';
 
 const STORAGE_KEY = 'copo-tool';
 let PRESETS = {};
@@ -359,37 +367,7 @@ export function copoSketch(p) {
         /* see above */
       }
     }
-    alphaImg = createAlphaImage(p.width, p.height, 1);
-  }
-
-  // Transparency checkerboard shown behind transparent backgrounds.
-  function createAlphaImage(width, height, density) {
-    const buffer = p.createGraphics(width, height);
-    buffer.pixelDensity(density);
-    buffer.noStroke();
-    buffer.push();
-    buffer.fill(255);
-    buffer.rect(0, 0, width, height);
-
-    const size = (height + width) / 100;
-    let xBool = true;
-    let yBool;
-    const modY = height % size;
-    const modX = width % size;
-    const divY = modY / (height / size);
-    const divX = modX / (width / size);
-
-    for (let y = 0; y < height - modY; y += size + divY) {
-      xBool = !xBool;
-      yBool = xBool;
-      for (let x = 0; x < width - modX; x += size + divX) {
-        yBool = !yBool;
-        buffer.fill(yBool ? 255 : 220);
-        buffer.rect(x, y, size + divX, size + divY);
-      }
-    }
-    buffer.pop();
-    return buffer;
+    alphaImg = createAlphaImage(p, p.width, p.height, 1);
   }
 
   // ---- Frame data generation ----
@@ -429,9 +407,9 @@ export function copoSketch(p) {
     frameData.motionAmp =
       p.map(params.motion.amp, -100, 100, motionMin, motionMax) * rec.length.value;
 
-    const data = generatePoints(gForm.width, gForm.height, params);
+    const data = _generatePoints(gForm.width, gForm.height, params);
     const imageMask = getImageLightnessMap(data, gForm.width, gForm.height, mask.image.data);
-    const gridSeed = generateSeedGrid(pattern.cells.x, pattern.cells.y, pattern.seed.random);
+    const gridSeed = _generateSeedGrid(pattern.cells.x, pattern.cells.y, pattern.seed.random);
 
     frameData.offset = getCanvasOffset(data, gForm.width, gForm.height);
     frameData.count = data.length;
@@ -474,7 +452,7 @@ export function copoSketch(p) {
       const vxShift = x - xCenterShift;
       const vyShift = y - yCenterShift;
 
-      const tileCenterShift = maxTileDistance(col, row, xSize, ySize, xCenterShift, yCenterShift);
+      const tileCenterShift = _maxTileDistance(col, row, xSize, ySize, xCenterShift, yCenterShift);
       const distanceShift = Math.sqrt(vxShift * vxShift + vyShift * vyShift);
 
       const swirlCenter = tileCenterShift / 2;
@@ -734,92 +712,18 @@ export function copoSketch(p) {
     }
   }
 
-  // ---- Frame data helpers ----
-  function maxTileDistance(col, row, xSize, ySize, xCenter, yCenter) {
-    const x0 = col * xSize;
-    const x1 = (col + 1) * xSize;
-    const y0 = row * ySize;
-    const y1 = (row + 1) * ySize;
-
-    const d1 = p.dist(xCenter, yCenter, x0, y0);
-    const d2 = p.dist(xCenter, yCenter, x1, y0);
-    const d3 = p.dist(xCenter, yCenter, x1, y1);
-    const d4 = p.dist(xCenter, yCenter, x0, y1);
-
-    return Math.max(d1, d2, d3, d4);
-  }
-
-  function generatePoints(width, height, params) {
+  // ---- Frame data helpers (thin wrappers that bind p5 callbacks) ----
+  function _generatePoints(width, height, params) {
     p.randomSeed(seed.value);
-
-    const gridX = params.grid.x;
-    const gridY = params.grid.y;
-    const count = params.count.value;
-
-    const cols = Math.floor(width / gridX);
-    const rows = Math.floor(height / gridY);
-
-    const allPoints = [];
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < rows; j++) {
-        allPoints.push([i * gridX, j * gridY]);
-      }
-    }
-
-    for (let i = allPoints.length - 1; i > 0; i--) {
-      const j = Math.floor(p.random(i + 1));
-      [allPoints[i], allPoints[j]] = [allPoints[j], allPoints[i]];
-    }
-
-    return allPoints.slice(0, count);
+    return generatePoints(p.random.bind(p), width, height, params.grid.x, params.grid.y, params.count.value);
   }
 
-  function getCanvasOffset(points, width, height) {
-    let minX = Infinity,
-      maxX = -Infinity;
-    let minY = Infinity,
-      maxY = -Infinity;
-
-    for (const [x, y] of points) {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-
-    return { x: width / 2 - (minX + maxX) / 2, y: height / 2 - (minY + maxY) / 2 };
+  function _generateSeedGrid(cols, rows, randomAmount = 0) {
+    return generateSeedGrid(p.random.bind(p), cols, rows, randomAmount);
   }
 
-  function generateSeedGrid(cols, rows, randomAmount = 0, maxValue = 5) {
-    const grid = [];
-    const cx = (cols - 1) / 2;
-    const cy = (rows - 1) / 2;
-    const maxDist = Math.max(Math.sqrt(cx * cx + cy * cy), 0.0001);
-
-    for (let i = 0; i < cols; i++) {
-      grid[i] = [];
-      for (let j = 0; j < rows; j++) {
-        const dx = i - cx;
-        const dy = j - cy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const base = (dist / maxDist) * maxValue;
-        const jitter = p.random(-randomAmount, randomAmount);
-        grid[i][j] = base + jitter;
-      }
-    }
-
-    const ci = Math.floor(cols / 2);
-    const cj = Math.floor(rows / 2);
-    if (cols >= 2 && rows >= 2 && cols % 2 === 0 && rows % 2 === 0) {
-      grid[ci][cj] = 0;
-      grid[ci - 1][cj] = 0;
-      grid[ci][cj - 1] = 0;
-      grid[ci - 1][cj - 1] = 0;
-    } else {
-      grid[ci][cj] = 0;
-    }
-
-    return grid;
+  function _maxTileDistance(col, row, xSize, ySize, xCenter, yCenter) {
+    return maxTileDistance(p.dist.bind(p), xCenter, yCenter, col, row, xSize, ySize);
   }
 
   // ---- Image mask ----
@@ -910,22 +814,6 @@ export function copoSketch(p) {
     saveState();
   }
 
-  function deepMerge(target, src) {
-    if (!src || typeof src !== 'object') return;
-    for (const key of Object.keys(src)) {
-      const v = src[key];
-      if (v === undefined) continue;
-      if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-        if (!target[key] || typeof target[key] !== 'object') target[key] = {};
-        deepMerge(target[key], v);
-      } else if (Array.isArray(v)) {
-        target[key] = JSON.parse(JSON.stringify(v));
-      } else {
-        target[key] = v;
-      }
-    }
-  }
-
   // ---- Persistence ----
   function serializeState() {
     return {
@@ -945,13 +833,26 @@ export function copoSketch(p) {
     };
   }
 
-  let saveTimer = null;
-  function saveState() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      safeStorage.setItem(STORAGE_KEY, JSON.stringify(serializeState()));
-    }, 500);
-  }
+  const { saveState, loadState } = createPersistence(
+    STORAGE_KEY,
+    'copo',
+    serializeState,
+    (data) => {
+      deepMerge(seed, data.seed);
+      deepMerge(cnv, data.cnv);
+      deepMerge(params, data.params);
+      deepMerge(pattern, data.pattern);
+      deepMerge(mask, data.mask);
+      deepMerge(palette, data.palette);
+      deepMerge(rec, data.rec);
+      if (data.shape?.type) shape.type = data.shape.type;
+      if (data.shape?.svg) {
+        shapeTypesData.custom.svg = data.shape.svg;
+        shapeTypesData.custom.width = data.shape.width || shapeTypesData.custom.width;
+        shapeTypesData.custom.height = data.shape.height || shapeTypesData.custom.height;
+      }
+    }
+  );
 
   function exportPreset() {
     const data = serializeState();
@@ -988,30 +889,6 @@ export function copoSketch(p) {
     });
   }
 
-  function loadState() {
-    try {
-      const raw = safeStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      const data = JSON.parse(raw);
-      deepMerge(seed, data.seed);
-      deepMerge(cnv, data.cnv);
-      deepMerge(params, data.params);
-      deepMerge(pattern, data.pattern);
-      deepMerge(mask, data.mask);
-      deepMerge(palette, data.palette);
-      deepMerge(rec, data.rec);
-      if (data.shape?.type) shape.type = data.shape.type;
-      if (data.shape?.svg) {
-        shapeTypesData.custom.svg = data.shape.svg;
-        shapeTypesData.custom.width = data.shape.width || shapeTypesData.custom.width;
-        shapeTypesData.custom.height = data.shape.height || shapeTypesData.custom.height;
-      }
-      return true;
-    } catch (e) {
-      console.warn('[copo] state restore failed:', e);
-      return false;
-    }
-  }
 
   // ---- Export ----
   function setStatus(msg) {
@@ -1035,7 +912,7 @@ export function copoSketch(p) {
   }
 
   function exportPNG() {
-    p.saveCanvas(`copo-${timestamp()}`, 'png');
+    sharedExportPNG(p, 'copo');
   }
 
   function exportSVG() {
@@ -1149,78 +1026,8 @@ export function copoSketch(p) {
     return `#${p.hex(r, 2)}${p.hex(g, 2)}${p.hex(b, 2)}`;
   }
 
-  async function exportMP4() {
-    if (recVideo.active) return;
-    recVideo.active = true;
-    setStatus('Preparing video…');
-
-    const w = p.width * cnv.density.base;
-    const h = p.height * cnv.density.base;
-    const copy = document.createElement('canvas');
-    copy.width = w;
-    copy.height = h;
-    const copyCtx = copy.getContext('2d');
-
-    let encoder;
-    try {
-      encoder = await (await ensureHME()).createH264MP4Encoder();
-    } catch (e) {
-      console.error(e);
-      setStatus('Video export failed');
-      recVideo.active = false;
-      return;
-    }
-
-    encoder.outputFilename = `copo-${timestamp()}.mp4`;
-    encoder.width = w;
-    encoder.height = h;
-    encoder.frameRate = rec.frameRate;
-    encoder.quantizationParameter = 22;
-    encoder.groupOfPictures = 1;
-    encoder.initialize();
-
-    const totalFrames = recVideo.seconds * rec.frameRate;
-    const savedFrame = cnv.frame;
-
-    try {
-      for (let f = 0; f < totalFrames; f++) {
-        cnv.frame = Math.round((f / totalFrames) * (rec.length.value * rec.frameRate));
-        drawComposite();
-        copyCtx.clearRect(0, 0, w, h);
-        copyCtx.drawImage(p.canvas, 0, 0, w, h);
-        const imageData = copyCtx.getImageData(0, 0, w, h);
-        encoder.addFrameRgba(imageData.data);
-        if (f % 5 === 0) setStatus(`Encoding ${f}/${totalFrames}`);
-        if (f % 10 === 0) await new Promise((r) => setTimeout(r, 0));
-      }
-
-      setStatus('Finalizing…');
-      encoder.finalize();
-      const uint8 = encoder.FS.readFile(encoder.outputFilename);
-      const blob = new Blob([uint8], { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = encoder.outputFilename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      setStatus('Video exported ✓');
-    } catch (e) {
-      console.error('[copo] MP4 export failed:', e);
-      setStatus('Video export failed');
-    } finally {
-      try {
-        encoder.delete();
-      } catch {
-        /* */
-      }
-      cnv.frame = savedFrame;
-      recVideo.active = false;
-      restartProgram();
-      setTimeout(() => setStatus(''), 3000);
-    }
+  function exportMP4() {
+    return sharedExportMP4({ p, prefix: 'copo', cnv, rec, recVideo, drawComposite, setStatus, onDone: restartProgram });
   }
 
   function bindFooter() {
